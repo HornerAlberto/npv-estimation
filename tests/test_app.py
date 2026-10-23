@@ -15,7 +15,8 @@ def test_app_runs_with_defaults():
     at = run_app()
     assert not at.exception
     assert at.title[0].value == "R&D value proposition"
-    assert len(at.success) == 1  # all default scenarios create value
+    # Over 2 years, Realistic and Optimistic create value; Pessimistic does not.
+    assert "2 of 3 scenarios create value" in at.warning[0].value
 
 
 def test_app_survives_extreme_parameters():
@@ -33,3 +34,45 @@ def test_low_margin_shows_loss_warning():
     at.slider(key="margin").set_value(20).run()
     assert not at.exception
     assert at.warning or at.error
+
+
+def test_one_year_window():
+    at = run_app()
+    at.segmented_control(key="window").set_value("1 year").run()
+    assert not at.exception
+    assert at.error  # no scenario pays back within a year with the default inputs
+
+
+def test_discounted_monthly_budget():
+    at = run_app()
+    at.toggle(key="discounted").set_value(True).run()
+    assert not at.exception
+    assert any(m.label == "NPV" for m in at.metric)
+
+
+def test_create_scenario_from_realistic():
+    at = run_app()
+    at.text_input(key="new_name").set_value("Stretch").run()
+    at.button(key="create").click().run()
+    assert not at.exception
+    assert "Stretch" in at.pills(key="visible").options
+    assert any("Created **Stretch**" in s.value for s in at.success)
+    labels = [m.value for m in at.metric if m.label == "NPV"]
+    assert len(labels) == 4
+    assert labels[1] == labels[3]  # copy of Realistic has the same NPV
+
+
+def test_payback_is_formatted():
+    at = run_app()
+    paybacks = [m.value for m in at.metric if m.label == "Discounted payback"]
+    assert paybacks == ["Not reached", "Month 16", "Month 13"]
+
+
+def test_validation_tab_cross_check_matches():
+    for window in ("2 years", "1 year"):
+        at = run_app()
+        at.segmented_control(key="window").set_value(window).run()
+        assert not at.exception
+        assert any("Cross-check" in s.value and "They match" in s.value for s in at.success), window
+        months = [m.value for m in at.markdown if m.value.startswith("*Month ")]
+        assert len(months) == (2 if window == "2 years" else 1)
