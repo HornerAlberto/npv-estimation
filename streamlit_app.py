@@ -12,6 +12,7 @@ import streamlit as st
 
 import charts
 from charts import Style, compact_money
+from npv import npv, periodic_rate
 from rd_value import (
     COST_TYPES,
     DEFAULT_COSTS,
@@ -206,13 +207,14 @@ window_label = top.segmented_control(
 )
 window = WINDOWS[window_label]
 
-tab_case, tab_month, tab_risk, tab_costs, tab_scen, tab_guide = st.tabs(
+tab_case, tab_month, tab_risk, tab_costs, tab_scen, tab_check, tab_guide = st.tabs(
     [
         ":material/insights: Investment case",
         ":material/calendar_month: Monthly budget",
         ":material/shield: Robustness",
         ":material/receipt_long: Costs",
         ":material/account_tree: Scenarios",
+        ":material/function: Validation",
         ":material/menu_book: Quickstart",
     ]
 )
@@ -614,6 +616,110 @@ with tab_scen:
         ":material/help: Open question: in Realistic, the second opportunity starts in month 6 as stated. "
         "By the Pessimistic convention (\"after N months\" = month N+1) it would be month 7. Change it above to compare."
     )
+
+# ---------------------------------------------------------------- validation
+
+def tex_num(v: float, decimals: int = 0) -> str:
+    """A number for LaTeX, with thousands separators that don't add math spacing."""
+    return f"{v:,.{decimals}f}".replace(",", "{,}")
+
+
+def tex_money(v: float) -> str:
+    return rf"\text{{{cur}}}\,{tex_num(v)}"
+
+
+with tab_check:
+    st.subheader("How the NPV is calculated")
+    check_scenario = next((s for s in scenarios if s.name == TEMPLATE), scenarios[0])
+    if check_scenario.name != TEMPLATE:
+        st.info(f"No scenario named {TEMPLATE}; showing **{check_scenario.name}** instead.", icon=":material/info:")
+    st.markdown(
+        f"A step-by-step check of the NPV for **{check_scenario.name}** over **{window_label}**, "
+        "using the current sidebar parameters and costs."
+    )
+    vf = monthly_flows(check_scenario, params, costs)
+    r_m = periodic_rate(params.annual_rate, "month")
+    bill, occ = params.billing_rate_monthly, params.occupation
+
+    with st.container(border=True):
+        st.markdown("**1. Monthly discount rate** (effective compounding of the annual rate)")
+        st.latex(rf"r_m = (1 + r)^{{1/12}} - 1 = (1 + {params.annual_rate:.4f})^{{1/12}} - 1 = {r_m:.6f}")
+
+    with st.container(border=True):
+        st.markdown("**2. Monthly net cash flow**")
+        st.latex(r"CF_t = B_t - OC_{\text{team}} - OC_{\text{deployed},\,t} - D_t")
+        st.latex(
+            rf"B_t = N_t \times \text{{rate}} \times \text{{margin}} = N_t \times {tex_money(bill)} \times {params.benefit_margin:.2f}"
+        )
+        st.latex(
+            rf"OC_{{\text{{team}}}} = n_{{R\&D}} \times \text{{rate}} \times \text{{occupation}} \times \text{{dedication}}"
+            rf" = {params.n_rd_consultants:g} \times {tex_money(bill)} \times {occ:.2f} \times {params.dedication:.2f}"
+            rf" = {tex_money(opportunity_cost(params))}"
+        )
+        if params.count_deployed_baseline:
+            st.latex(
+                rf"OC_{{\text{{deployed}},\,t}} = N_t \times \text{{rate}} \times \text{{occupation}} = N_t \times {tex_money(bill)} \times {occ:.2f}"
+            )
+        else:
+            st.latex(r"OC_{\text{deployed},\,t} = 0 \quad \text{(baseline switched off in the sidebar)}")
+        st.caption(
+            "N_t: consultants billing on R&D-generated work in month t. "
+            "D_t: direct costs active in month t (Costs tab)."
+        )
+
+    with st.container(border=True):
+        st.markdown("**3. Discounted cash flow in the last month of each year**")
+        for t in [m for m in (12, 24) if m <= window]:
+            row = vf.iloc[t - 1]
+            st.markdown(f"*Month {t}*: end of year {t // 12}, N = {row['consultants_staffed']:g} consultants")
+            st.latex(
+                rf"CF_{{{t}}} = {tex_money(row['benefit'])} - {tex_money(row['opportunity_cost'])}"
+                rf" - {tex_money(row['deployed_cost'])} - {tex_money(row['direct_costs'])} = {tex_money(row['net_flow'])}"
+            )
+            st.latex(
+                rf"PV_{{{t}}} = \frac{{CF_{{{t}}}}}{{(1 + r_m)^{{{t}}}}}"
+                rf" = \frac{{{tex_money(row['net_flow'])}}}{{(1 + {r_m:.6f})^{{{t}}}}}"
+                rf" = {tex_money(row['net_flow'])} \times {row['discount_factor']:.6f} = {tex_money(row['present_value'])}"
+            )
+
+    total = float(vf["present_value"].sum())
+    with st.container(border=True):
+        st.markdown(f"**4. NPV: the sum of every month's discounted cash flow** (CF₀ = 0, amounts in {cur})")
+        terms = [rf"\frac{{{tex_num(r['net_flow'])}}}{{(1+r_m)^{{{int(r['month'])}}}}}" for _, r in vf.iterrows()]
+        lines = [" + ".join(terms[i:i + 4]) for i in range(0, len(terms), 4)]
+        body = r" \\ &\quad + ".join(lines)
+        st.latex(
+            rf"\begin{{aligned}} NPV &= \sum_{{t=1}}^{{{window}}} \frac{{CF_t}}{{(1 + r_m)^t}} \\"
+            rf" &= {body} \\ &= {tex_money(total)} \end{{aligned}}"
+        )
+
+    independent = npv(params.annual_rate, [0.0, *vf["net_flow"]], period="month")
+    reported = summarize(check_scenario, params, costs)["npv"]
+    matches = abs(independent - total) < 0.01 and abs(reported - total) < 0.01
+    message = (
+        f"Cross-check: npv.py = **{money(independent)}**, sum of discounted flows = **{money(total)}**, "
+        f"Investment case = **{money(reported)}**."
+    )
+    if matches:
+        st.success(message + " They match.", icon=":material/check_circle:")
+    else:
+        st.error(message + " They do not match.", icon=":material/error:")
+
+    with st.expander("All months"):
+        st.dataframe(
+            vf[["month", "consultants_staffed", "net_flow", "discount_factor", "present_value", "cumulative_pv"]]
+            .round({"net_flow": 0, "present_value": 0, "cumulative_pv": 0, "discount_factor": 6}),
+            hide_index=True,
+            column_config={
+                "month": st.column_config.NumberColumn("Month", format="%d"),
+                "consultants_staffed": st.column_config.NumberColumn("N (consultants)", format="%.1f"),
+                "net_flow": st.column_config.NumberColumn(f"CF ({cur})", format="localized"),
+                "discount_factor": st.column_config.NumberColumn("Discount factor", format="%.6f"),
+                "present_value": st.column_config.NumberColumn(f"PV ({cur})", format="localized"),
+                "cumulative_pv": st.column_config.NumberColumn(f"Cumulative PV ({cur})", format="localized"),
+            },
+            alt=f"Monthly cash flows and discount factors for {check_scenario.name}",
+        )
 
 # ---------------------------------------------------------------- quickstart
 

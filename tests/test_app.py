@@ -66,3 +66,13 @@ def test_payback_is_formatted():
     at = run_app()
     paybacks = [m.value for m in at.metric if m.label == "Discounted payback"]
     assert paybacks == ["Not reached", "Month 16", "Month 13"]
+
+
+def test_validation_tab_cross_check_matches():
+    for window in ("2 years", "1 year"):
+        at = run_app()
+        at.segmented_control(key="window").set_value(window).run()
+        assert not at.exception
+        assert any("Cross-check" in s.value and "They match" in s.value for s in at.success), window
+        months = [m.value for m in at.markdown if m.value.startswith("*Month ")]
+        assert len(months) == (2 if window == "2 years" else 1)

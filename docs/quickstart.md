@@ -82,6 +82,14 @@ Pick which scenarios to show with the chips at the top of the page.
   - Safety buffer: the current margin minus the break-even margin.
   - Maximum R&D team size before NPV turns negative.
 
+### Validation: *how is the NPV calculated?*
+- A step-by-step, formula-style check of the **Realistic** scenario with the current parameters:
+  1. The monthly discount rate.
+  2. The cash flow formula.
+  3. The discounted cash flow in the last month of each year (months 12 and 24).
+  4. The full NPV sum.
+- A cross-check confirms that the independent `npv()` function, the sum of discounted flows and the Investment case figure agree.
+
 ## Tips
 
 - **Conservative case:** lower the *Benefit margin* (for example to 90%) to test discounts or slower ramp-up on new work.
