@@ -1,0 +1,9 @@
+[server]
+runOnSave = true
+
+# Accent colour (sliders, chips, tabs, toggles) matches the steel blue in charts.py.
+[theme.light]
+primaryColor = "#3e5874"
+
+[theme.dark]
+primaryColor = "#9db0c4"
