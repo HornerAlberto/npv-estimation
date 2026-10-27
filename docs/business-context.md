@@ -26,7 +26,7 @@ present value (NPV)** of monthly flows, evaluated under several benefit scenario
 
 ## Monthly flow model
 
-For each month *t* = 1 … window (12 or 24 months):
+For each month *t* = 1 … window (12, 24 or 36 months):
 
 ```
 net_flow(t) = benefit(t) − opportunity_cost − deployed_baseline(t) − monthly_investment(t)
@@ -114,7 +114,7 @@ only once opportunities appear). Discounting is what penalises waiting for them.
 | `dedication` | Share of R&D consultants' time on R&D | 1.0 |
 | `monthly_investment` | Direct R&D operating costs (licences, cloud) | to be provided |
 | `opportunities` | List of (start month, consultants) | per scenario |
-| `horizon_months` | Analysis window, the same for all scenarios | 12 or 24 |
+| `horizon_months` | Analysis window, the same for all scenarios | 12, 24 or 36 |
 | `benefit_margin` | Share of the full billing rate realised on new work | 1.0 |
 | `count_deployed_baseline` | Count the deployed consultants' baseline at the occupation KPI | on |
 | `annual_rate` | Pre-tax annual discount rate | to be provided |

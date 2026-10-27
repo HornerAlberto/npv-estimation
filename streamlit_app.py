@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 import charts
+import local_state
 from charts import Style, compact_money
 from npv import npv, periodic_rate
 from rd_value import (
@@ -36,6 +37,8 @@ QUICKSTART = Path(__file__).parent / "docs" / "quickstart.md"
 MAX_SCENARIOS = 8
 MAX_MONTH = max(WINDOWS.values())
 TEMPLATE = "Realistic"
+CURRENCIES = ["€", "$", "£"]
+COST_COLUMNS = ["Name", "Type", "Monthly amount", "Start month", "End month"]
 MONEY_COLUMNS = ["benefit", "opportunity_cost", "deployed_cost", "direct_costs", "total_cost", "net_flow"]
 
 st.set_page_config(page_title="R&D value proposition", page_icon=":material/science:", layout="wide")
@@ -91,7 +94,7 @@ WIDGET_DEFAULTS = {
 }
 # Editors render from these base tables; programmatic changes (new scenario, reset)
 # replace a base table and drop the editor's pending edits.
-BASE_TABLES = {"scen_base": default_scenarios_df, "opp_base": default_opportunities_df}
+BASE_TABLES = {"scen_base": default_scenarios_df, "opp_base": default_opportunities_df, "cost_base": default_costs_df}
 EDITOR_KEYS = ["scenarios_editor", "opportunities_editor", "costs_editor"]
 
 
@@ -130,6 +133,49 @@ def create_scenario() -> None:
     ss.created = name
 
 
+def saved_params(saved: dict) -> dict:
+    """Saved parameters that still fit the widgets; anything unknown or invalid falls back to its default."""
+    params = saved.get("params")
+    if not isinstance(params, dict):
+        return {}
+    valid = {}
+    for key, default in WIDGET_DEFAULTS.items():
+        value = params.get(key)
+        if isinstance(default, bool):
+            ok = isinstance(value, bool)
+        elif isinstance(default, (int, float)):
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+            value = type(default)(value) if ok else value
+        else:
+            ok = isinstance(value, str)
+        if ok:
+            valid[key] = value
+    if valid.get("window") not in WINDOWS:
+        valid.pop("window", None)
+    if valid.get("currency") not in CURRENCIES:
+        valid.pop("currency", None)
+    return valid
+
+
+def saved_costs(saved: dict) -> pd.DataFrame | None:
+    rows = saved.get("costs")
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return None
+    df = pd.DataFrame(rows, columns=COST_COLUMNS)
+    df[["Name", "Type"]] = df[["Name", "Type"]].astype(object)
+    return df.astype({"Monthly amount": float, "Start month": float, "End month": float})
+
+
+# Restore the last saved parameters and costs once per browser session; "Reset everything"
+# then goes back to the defaults (and saves them).
+if "state_loaded" not in st.session_state:
+    saved = local_state.load_state()
+    st.session_state.update(saved_params(saved))
+    costs_saved = saved_costs(saved)
+    if costs_saved is not None:
+        st.session_state.cost_base = costs_saved
+    st.session_state.state_loaded = True
+
 for key, value in WIDGET_DEFAULTS.items():
     st.session_state.setdefault(key, value)
 for key, factory in BASE_TABLES.items():
@@ -148,7 +194,7 @@ with st.sidebar:
               help="Share of each R&D consultant's time spent on the project.")
 
     st.subheader(":material/payments: Billing", divider="gray")
-    st.selectbox("Currency", ["€", "$", "£"], key="currency")
+    st.selectbox("Currency", CURRENCIES, key="currency")
     st.number_input("Billing rate per consultant per month", min_value=0.0, step=500.0, format="%.0f", key="billing",
                     help="What a client pays for one full-time consultant for a month. Not the salary.")
     st.slider("Occupation KPI", 0, 100, format="%d%%", key="occupation",
@@ -230,26 +276,33 @@ with tab_costs:
         "for the whole window; set start = end for a one-off cost."
     )
     costs_df = st.data_editor(
-        default_costs_df(),
+        st.session_state.cost_base,
         key="costs_editor",
         num_rows="dynamic",
         hide_index=True,
         column_config={
             "Name": st.column_config.TextColumn("Name", required=True, width="medium"),
             "Type": st.column_config.SelectboxColumn("Type", options=COST_TYPES, required=True, default="Other"),
-            "Monthly amount": st.column_config.NumberColumn(f"Monthly amount ({cur})", min_value=0.0, step=100.0, format="localized", required=True),
+            # The label leaves out the currency: changing the column config would drop the edits.
+            "Monthly amount": st.column_config.NumberColumn("Monthly amount", help="In the currency chosen in the sidebar.", min_value=0.0, step=100.0, format="localized", required=True),
             "Start month": st.column_config.NumberColumn("Start month", min_value=1, max_value=MAX_MONTH, step=1, default=1, required=True),
             "End month": st.column_config.NumberColumn("End month", min_value=1, max_value=MAX_MONTH, step=1, help="Empty = until the end of the window."),
         },
         alt="Editable list of direct monthly R&D costs",
     )
+    st.caption(":material/save: Costs and sidebar parameters are saved on this computer and restored next time you open the app.")
+
+local_state.save_state(
+    {key: st.session_state[key] for key in WIDGET_DEFAULTS},
+    costs_df[COST_COLUMNS].to_dict("records"),
+)
 
 with tab_scen:
     st.subheader("Scenarios")
     st.markdown(
         "Each scenario is a list of **opportunities**: client work the R&D generates. "
         "From its start month on, an opportunity bills its consultants full time until the end of the "
-        "window, and opportunities add up. The window (1 or 2 years) is chosen at the top of the page."
+        "window, and opportunities add up. The window (1, 2 or 3 years) is chosen at the top of the page."
     )
     scen_df = st.data_editor(
         st.session_state.scen_base,
@@ -669,7 +722,7 @@ with tab_check:
 
     with st.container(border=True):
         st.markdown("**3. Discounted cash flow in the last month of each year**")
-        for t in [m for m in (12, 24) if m <= window]:
+        for t in range(12, window + 1, 12):
             row = vf.iloc[t - 1]
             st.markdown(f"*Month {t}*: end of year {t // 12}, N = {row['consultants_staffed']:g} consultants")
             st.latex(

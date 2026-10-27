@@ -85,7 +85,7 @@ class Params:
     count_deployed_baseline: bool = True
 
 
-WINDOWS = {"1 year": 12, "2 years": 24}
+WINDOWS = {"1 year": 12, "2 years": 24, "3 years": 36}
 
 
 DEFAULT_SCENARIOS: tuple[Scenario, ...] = (

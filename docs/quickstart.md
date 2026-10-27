@@ -30,7 +30,7 @@ Two opportunity costs are counted:
 
 The defaults are placeholders: replace them with your firm's figures.
 
-At the top of the page, **Analysis window** switches between **1 year** and **2 years**. Every scenario is evaluated over the same window.
+At the top of the page, **Analysis window** switches between **1 year**, **2 years** and **3 years**. Every scenario is evaluated over the same window.
 
 ## 2. Add your monthly costs (Costs tab)
 
@@ -86,7 +86,7 @@ Pick which scenarios to show with the chips at the top of the page.
 - A step-by-step, formula-style check of the **Realistic** scenario with the current parameters:
   1. The monthly discount rate.
   2. The cash flow formula.
-  3. The discounted cash flow in the last month of each year (months 12 and 24).
+  3. The discounted cash flow in the last month of each year (months 12, 24 and 36).
   4. The full NPV sum.
 - A cross-check confirms that the independent `npv()` function, the sum of discounted flows and the Investment case figure agree.
 
@@ -94,8 +94,9 @@ Pick which scenarios to show with the chips at the top of the page.
 
 - **Conservative case:** lower the *Benefit margin* (for example to 90%) to test discounts or slower ramp-up on new work.
 - **Partial dedication:** set *Dedication* below 100% if the R&D team keeps some client work.
-- **1 year vs 2 years:** opportunities take time to arrive, so the 1-year window is a much harder test. Compare scenarios over the same window.
-- **Start over:** **Reset everything** in the sidebar restores all defaults, including the cost and scenario tables.
+- **1, 2 or 3 years:** opportunities take time to arrive, so the 1-year window is a much harder test. Compare scenarios over the same window.
+- **Your inputs are saved:** the sidebar parameters, the analysis window and the cost table are saved in `.local/state.json` (git-ignored) and restored the next time you open the app. Edits to costs immediately update every view.
+- **Start over:** **Reset everything** in the sidebar restores all defaults, including the cost and scenario tables, and overwrites the saved state.
 
 ## Assumptions to keep in mind
 

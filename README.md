@@ -18,6 +18,7 @@ Then open the **Quickstart** tab in the app, or read [docs/quickstart.md](docs/q
 - `streamlit_app.py`: interactive app with three views (investment case, monthly budget, robustness), a cost editor and a scenario editor
 - `rd_value.py`: monthly flow model for the R&D project (costs, benefits, payback, break-even)
 - `charts.py`: Altair chart builders used by the app
+- `local_state.py`: saves the parameters and costs to `.local/state.json` (git-ignored) so they survive restarts
 - `npv.py`: NPV calculation (annual rate, per-period cash flows: year, semester, month, week)
 - `npv_estimation.ipynb`: worked examples of `npv.py`
 
