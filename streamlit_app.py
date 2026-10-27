@@ -216,6 +216,8 @@ with st.sidebar:
     st.button("Reset everything", icon=":material/restart_alt:", on_click=reset_all, width="stretch")
 
 cur = st.session_state.currency
+# "$" opens math in Markdown and LaTeX; escape it wherever the currency is rendered as text.
+md_cur = cur.replace("$", r"\$")
 params = Params(
     n_rd_consultants=st.session_state.n_rd,
     billing_rate_monthly=st.session_state.billing,
@@ -234,7 +236,7 @@ def payback_text(month) -> str:
 
 
 def money(v: float) -> str:
-    return f"{'−' if v < 0 else ''}{cur}{abs(v):,.0f}"
+    return f"{'−' if v < 0 else ''}{md_cur}{abs(v):,.0f}"
 
 
 # ---------------------------------------------------------------- page
@@ -678,7 +680,7 @@ def tex_num(v: float, decimals: int = 0) -> str:
 
 
 def tex_money(v: float) -> str:
-    return rf"\text{{{cur}}}\,{tex_num(v)}"
+    return rf"\text{{{md_cur}}}\,{tex_num(v)}"
 
 
 with tab_check:
@@ -737,7 +739,7 @@ with tab_check:
 
     total = float(vf["present_value"].sum())
     with st.container(border=True):
-        st.markdown(f"**4. NPV: the sum of every month's discounted cash flow** (CF₀ = 0, amounts in {cur})")
+        st.markdown(f"**4. NPV: the sum of every month's discounted cash flow** (CF₀ = 0, amounts in {md_cur})")
         terms = [rf"\frac{{{tex_num(r['net_flow'])}}}{{(1+r_m)^{{{int(r['month'])}}}}}" for _, r in vf.iterrows()]
         lines = [" + ".join(terms[i:i + 4]) for i in range(0, len(terms), 4)]
         body = r" \\ &\quad + ".join(lines)

@@ -129,3 +129,14 @@ def test_unreadable_state_falls_back_to_defaults(state_dir):
     at = run_app()
     assert not at.exception
     assert "2 of 3 scenarios create value" in at.warning[0].value
+
+
+def test_dollar_currency_renders_as_text():
+    at = run_app()
+    at.selectbox(key="currency").set_value("$").run()
+    assert not at.exception
+    bodies = [l.value.strip().removeprefix("$$").removesuffix("$$") for l in at.latex]  # st.latex wraps in $$
+    assert all("$" not in b.replace(r"\$", "") for b in bodies)
+    assert any(r"\text{\$}" in b for b in bodies)
+    cross_check = next(s.value for s in at.success if "Cross-check" in s.value)
+    assert cross_check.count(r"\$") == 3
