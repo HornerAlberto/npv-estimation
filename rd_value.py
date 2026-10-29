@@ -5,10 +5,16 @@ benefit scenarios.
 
 For each month t = 1 ... horizon:
 
-    net_flow(t) = benefit(t) - direct_costs(t) - opportunity_cost
+    net_flow(t) = benefit(t) - opportunity_cost - deployed_cost(t) - direct_costs(t)
 
     opportunity_cost = n_rd_consultants * billing_rate * occupation * dedication
     benefit(t)       = billing_rate * benefit_margin * consultants staffed in month t
+    deployed_cost(t) = billing_rate * occupation * consultants staffed in month t
+
+deployed_cost is the baseline the consultants staffed on R&D-generated work
+would have billed anyway (at the occupation KPI). Counting it means only the
+billing above that baseline is a gain. It can be switched off with
+Params.count_deployed_baseline.
 
 Flows are discounted monthly with npv.py (CF_0 = 0, annual rate converted with
 effective compounding).
@@ -20,7 +26,8 @@ import pandas as pd
 
 from npv import npv_table
 
-OPPORTUNITY_COST = "Consultant time (opportunity cost)"
+OPPORTUNITY_COST = "R&D team time (opportunity cost)"
+DEPLOYED_COST = "Deployed consultants' baseline (opportunity cost)"
 
 # Types for direct monthly costs (everything except consultants' time).
 COST_TYPES = [
@@ -46,6 +53,7 @@ class Scenario:
     name: str
     horizon_months: int
     opportunities: tuple[Opportunity, ...]
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,20 +81,34 @@ class Params:
     dedication: float = 1.0
     benefit_margin: float = 1.0
     annual_rate: float = 0.12
+    # Compare deployed consultants against billing at the occupation KPI anyway.
+    count_deployed_baseline: bool = True
+
+
+WINDOWS = {"1 year": 12, "2 years": 24, "3 years": 36}
 
 
 DEFAULT_SCENARIOS: tuple[Scenario, ...] = (
-    Scenario("1. One opportunity", 12, (Opportunity(5, 4),)),
-    Scenario("2. Two opportunities", 12, (Opportunity(4, 3), Opportunity(6, 7))),
     Scenario(
-        "3. Scenario 1 over 3 years",
-        36,
-        (Opportunity(5, 4), Opportunity(13, 5), Opportunity(25, 4)),
+        "Pessimistic",
+        24,
+        (Opportunity(5, 4), Opportunity(13, 5)),
+        "After four months the R&D finds one opportunity for 4 consultants. "
+        "In the second year a new opportunity adds 5 more.",
     ),
     Scenario(
-        "4. Scenario 2 over 3 years",
-        36,
-        (Opportunity(4, 3), Opportunity(6, 7), Opportunity(13, 9), Opportunity(25, 5)),
+        "Realistic",
+        24,
+        (Opportunity(4, 3), Opportunity(6, 7), Opportunity(13, 9)),
+        "After three months an opportunity onboards 3 consultants; at month 6 a strong "
+        "opportunity adds 7. In the second year a new opportunity adds 9 more.",
+    ),
+    Scenario(
+        "Optimistic",
+        24,
+        (Opportunity(3, 4), Opportunity(6, 8), Opportunity(13, 10), Opportunity(19, 5)),
+        "The R&D pays off early: 4 consultants from month 3 and 8 more from month 6. "
+        "The second year brings an opportunity for 10 at its start and another for 5 at mid-year.",
     ),
 )
 
@@ -111,6 +133,13 @@ def consultants_staffed(scenario: Scenario, month: int) -> float:
     return sum(o.consultants for o in scenario.opportunities if o.start_month <= month)
 
 
+def deployed_cost(params: Params, staffed: float) -> float:
+    """Billing the staffed consultants would have produced anyway, at the occupation KPI."""
+    if not params.count_deployed_baseline:
+        return 0.0
+    return staffed * params.billing_rate_monthly * params.occupation
+
+
 def monthly_flows(
     scenario: Scenario, params: Params, costs: tuple[CostItem, ...] = DEFAULT_COSTS
 ) -> pd.DataFrame:
@@ -120,6 +149,7 @@ def monthly_flows(
     for month in range(1, scenario.horizon_months + 1):
         staffed = consultants_staffed(scenario, month)
         benefit = staffed * params.billing_rate_monthly * params.benefit_margin
+        deployed = deployed_cost(params, staffed)
         direct = sum(c.amount_in(month) for c in costs)
         rows.append(
             {
@@ -127,9 +157,10 @@ def monthly_flows(
                 "consultants_staffed": staffed,
                 "benefit": benefit,
                 "opportunity_cost": opp_cost,
+                "deployed_cost": deployed,
                 "direct_costs": direct,
-                "total_cost": opp_cost + direct,
-                "net_flow": benefit - opp_cost - direct,
+                "total_cost": opp_cost + deployed + direct,
+                "net_flow": benefit - opp_cost - deployed - direct,
             }
         )
     df = pd.DataFrame(rows)
@@ -144,7 +175,7 @@ def monthly_flows(
 def cost_breakdown(
     scenario: Scenario, params: Params, costs: tuple[CostItem, ...] = DEFAULT_COSTS
 ) -> pd.DataFrame:
-    """Long format: month, cost_type, item, amount (opportunity cost included)."""
+    """Long format: month, cost_type, item, amount (opportunity costs included)."""
     opp_cost = opportunity_cost(params)
     rows = []
     for month in range(1, scenario.horizon_months + 1):
@@ -156,6 +187,16 @@ def cost_breakdown(
                 "amount": opp_cost,
             }
         )
+        deployed = deployed_cost(params, consultants_staffed(scenario, month))
+        if deployed:
+            rows.append(
+                {
+                    "month": month,
+                    "cost_type": DEPLOYED_COST,
+                    "item": DEPLOYED_COST,
+                    "amount": deployed,
+                }
+            )
         for c in costs:
             amount = c.amount_in(month)
             if amount:
@@ -174,6 +215,11 @@ def npv_of(
     scenario: Scenario, params: Params, costs: tuple[CostItem, ...] = DEFAULT_COSTS
 ) -> float:
     return float(monthly_flows(scenario, params, costs)["present_value"].sum())
+
+
+def scenario_from(template: Scenario, name: str) -> Scenario:
+    """A new scenario with the template's opportunities, as a starting point to edit."""
+    return replace(template, name=name, description=f"Based on {template.name}. Edit its opportunities.")
 
 
 def summarize(
@@ -200,6 +246,7 @@ def summarize(
         "npv": npv,
         "pv_benefit": float((df["benefit"] * dfac).sum()),
         "pv_opportunity_cost": float((df["opportunity_cost"] * dfac).sum()),
+        "pv_deployed_cost": float((df["deployed_cost"] * dfac).sum()),
         "pv_direct_costs": float((df["direct_costs"] * dfac).sum()),
         "payback_month": payback,
         # Deepest point of cumulative PV: the funding the project needs before it pays back.

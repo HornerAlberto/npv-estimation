@@ -26,15 +26,15 @@ present value (NPV)** of monthly flows, evaluated under several benefit scenario
 
 ## Monthly flow model
 
-For each month *t* = 1 … horizon:
+For each month *t* = 1 … window (12, 24 or 36 months):
 
 ```
-net_flow(t) = benefit(t) − monthly_investment − opportunity_cost
+net_flow(t) = benefit(t) − opportunity_cost − deployed_baseline(t) − monthly_investment(t)
 ```
 
 There is no flow at t = 0 (CF₀ = 0).
 
-### Costs (constant, every month of the horizon)
+### Costs
 
 1. **Opportunity cost of the R&D team.** The consultants on R&D could otherwise be
    billing clients.
@@ -55,8 +55,20 @@ There is no flow at t = 0 (CF₀ = 0).
    - Optional refinement: if client projects carry variable costs (travel,
      subcontractors), the forgone amount is billing minus those costs.
 
-2. **Monthly investment.** Direct R&D operating costs **other than consultants' time**,
-   e.g. software licences and cloud computing resources.
+2. **Deployed consultants' baseline.** Consultants staffed on R&D-generated work would
+   have billed at the occupation KPI anyway, so that baseline is an opportunity cost too:
+
+   ```
+   deployed_baseline(t) = consultants staffed in month t × billing_rate_monthly × occupation
+   ```
+
+   With 4 consultants on a new project, the comparison is against those 4 consultants
+   billing at 73%. Only billing above that baseline is a gain. A switch in the app turns
+   this off, so their full billing counts as gain.
+
+3. **Monthly investment.** Direct R&D operating costs **other than consultants' time**,
+   e.g. software licences and cloud computing resources. They are listed as items with a
+   type, a monthly amount and an active window.
 
 ### Benefits
 
@@ -68,14 +80,13 @@ benefit(t) = billing_rate_monthly × benefit_margin × Σ consultants of opportu
 ```
 
 - Opportunities are **additive and persistent**: once one starts, it stays active until
-  the end of the horizon, and later opportunities add to it.
-- Benefits are at **full billing** (`benefit_margin` = 1.0, no occupation factor). This
-  assumes the new work is staffed from bench time or new hires, so its revenue is
-  genuinely new.
-- `benefit_margin` is a parameter for sensitivity analysis. A reviewer could argue that
-  consultants staffed on the new work would otherwise have billed other clients, so only
-  part of the revenue is incremental; lowering the margin tests that. **This is the
-  assumption most likely to be challenged in the value proposition.**
+  the end of the window, and later opportunities add to it.
+- The benefit is the **full billing** of the new work (`benefit_margin` = 1.0). The
+  deployed consultants' baseline (cost 2 above) nets out what they would have billed
+  anyway, so the net gain per deployed consultant is billing × (margin − occupation).
+- `benefit_margin` is the share of the full billing rate realised on the new work, for
+  sensitivity analysis (discounts, slower ramp-up, partial staffing). With the baseline
+  on, the margin must exceed the occupation KPI for new work to add value at all.
 
 ## Discounting
 
@@ -103,16 +114,19 @@ only once opportunities appear). Discounting is what penalises waiting for them.
 | `dedication` | Share of R&D consultants' time on R&D | 1.0 |
 | `monthly_investment` | Direct R&D operating costs (licences, cloud) | to be provided |
 | `opportunities` | List of (start month, consultants) | per scenario |
-| `horizon_months` | Analysis window | 12 or 36 (per scenario) |
-| `benefit_margin` | Share of new billing counted as benefit | 1.0 |
+| `horizon_months` | Analysis window, the same for all scenarios | 12, 24 or 36 |
+| `benefit_margin` | Share of the full billing rate realised on new work | 1.0 |
+| `count_deployed_baseline` | Count the deployed consultants' baseline at the occupation KPI | on |
 | `annual_rate` | Pre-tax annual discount rate | to be provided |
 
 ## Implementation
 
 - `npv.py`: NPV with the `"month"` period (n = 12).
-- `rd_value.py`: `monthly_flows(...)` returns benefit, opportunity cost, direct costs,
-  net flow and discounting per month; `summarize(...)` adds payback and peak funding
-  need; break-even benefit margin and team size. The four scenarios are defined as data.
+- `rd_value.py`: `monthly_flows(...)` returns benefit, R&D team opportunity cost,
+  deployed consultants' baseline, direct costs, net flow and discounting per month;
+  `summarize(...)` adds payback and peak funding need; break-even benefit margin and
+  team size. The pessimistic, realistic and optimistic scenarios are defined as data, and
+  `scenario_from(...)` copies one as the start of a new scenario.
 - Direct costs are a list of items (name, type, monthly amount, start and end month), so
   they can be broken down by type.
 - `streamlit_app.py`: interactive app; see [quickstart.md](quickstart.md).

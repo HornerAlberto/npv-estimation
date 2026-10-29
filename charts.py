@@ -11,12 +11,15 @@ simulated colour blindness, in both modes.
 import altair as alt
 import pandas as pd
 
-from rd_value import COST_TYPES, OPPORTUNITY_COST
+from rd_value import COST_TYPES, DEPLOYED_COST, OPPORTUNITY_COST
 
 CATEGORICAL = {
     "light": ["#2a78d6", "#3e5874", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
     "dark": ["#3987e5", "#9db0c4", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
 }
+# Tint of slot 2 for the deployed consultants' baseline: same kind of cost as the
+# R&D team's time, so the same hue family, distinct in lightness.
+DEPLOYED_TINT = {"light": "#a9bccf", "dark": "#46607c"}
 INK = {
     "light": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#898781", "surface": "#fcfcfb"},
     "dark": {"primary": "#f0efec", "secondary": "#c3c2b7", "muted": "#898781", "surface": "#1a1a19"},
@@ -38,9 +41,9 @@ class Style:
         self.ink = INK[self.mode]
         self.currency = currency
 
-    # Benefit is slot 1; consultant time slot 2; direct cost types take slots 3-8.
+    # Benefit is slot 1; R&D team time slot 2 (deployed baseline its tint); direct cost types slots 3-8.
     def component_scale(self, components: list[str] | None = None) -> alt.Scale:
-        mapping = {BENEFIT: self.palette[0], OPPORTUNITY_COST: self.palette[1]}
+        mapping = {BENEFIT: self.palette[0], OPPORTUNITY_COST: self.palette[1], DEPLOYED_COST: DEPLOYED_TINT[self.mode]}
         mapping.update(zip(COST_TYPES, self.palette[2:]))
         mapping[DIRECT_COSTS] = self.ink["muted"]
         domain = components or list(mapping)
@@ -113,15 +116,17 @@ def value_bridge(summaries: pd.DataFrame, names: list[str], style: Style) -> alt
         rows += [
             {"scenario": s["scenario"], "component": BENEFIT, "value": s["pv_benefit"], "order": 0},
             {"scenario": s["scenario"], "component": OPPORTUNITY_COST, "value": -s["pv_opportunity_cost"], "order": 1},
-            {"scenario": s["scenario"], "component": DIRECT_COSTS, "value": -s["pv_direct_costs"], "order": 2},
+            {"scenario": s["scenario"], "component": DEPLOYED_COST, "value": -s["pv_deployed_cost"], "order": 2},
+            {"scenario": s["scenario"], "component": DIRECT_COSTS, "value": -s["pv_direct_costs"], "order": 3},
         ]
     df = pd.DataFrame(rows)
-    components = [BENEFIT, OPPORTUNITY_COST, DIRECT_COSTS]
+    df = df[df["value"] != 0]
+    components = [c for c in [BENEFIT, OPPORTUNITY_COST, DEPLOYED_COST, DIRECT_COSTS] if c in set(df["component"])]
     y = alt.Y("scenario:N", sort=names, title=None, axis=alt.Axis(labelLimit=220))
     bars = alt.Chart(df).mark_bar(height=22, stroke=style.ink["surface"], strokeWidth=2).encode(
         y=y,
         x=alt.X("value:Q", axis=style.money_axis("Present value"), scale=alt.Scale(domain=[float(df["value"].min()) * 1.1, float(df["value"].max()) * 1.15])),
-        color=alt.Color("component:N", scale=style.component_scale(components), legend=alt.Legend(title=None, orient="bottom", labelLimit=320)),
+        color=alt.Color("component:N", scale=style.component_scale(components), legend=alt.Legend(title=None, orient="bottom", labelLimit=320, columns=2)),
         order=alt.Order("order:Q"),
         tooltip=[alt.Tooltip("scenario:N", title="Scenario"), alt.Tooltip("component:N", title="Component"), style.money_tooltip("value:Q", "Present value")],
     )
@@ -136,8 +141,11 @@ def value_bridge(summaries: pd.DataFrame, names: list[str], style: Style) -> alt
     return alt.layer(bars, tick, label).properties(height=max(160, 70 * len(names)))
 
 
-def monthly_budget(flows: pd.DataFrame, breakdown: pd.DataFrame, style: Style) -> alt.LayerChart:
-    """Benefit above zero, costs stacked by type below zero, net flow as a line."""
+def monthly_budget(flows: pd.DataFrame, breakdown: pd.DataFrame, style: Style, y_title: str = "Per month") -> alt.LayerChart:
+    """Benefit above zero, costs stacked by type below zero, net flow as a line.
+
+    Pass discounted flows and breakdown to show present values instead.
+    """
     by_type = breakdown.groupby(["month", "cost_type"], as_index=False)["amount"].sum()
     bars_df = pd.concat(
         [
@@ -146,13 +154,14 @@ def monthly_budget(flows: pd.DataFrame, breakdown: pd.DataFrame, style: Style) -
         ],
         ignore_index=True,
     )
-    components = [BENEFIT, OPPORTUNITY_COST, *[t for t in COST_TYPES if t in set(by_type["cost_type"])]]
+    present = set(by_type["cost_type"])
+    components = [BENEFIT, *[c for c in [OPPORTUNITY_COST, DEPLOYED_COST, *COST_TYPES] if c in present]]
     order_map = {c: i for i, c in enumerate(components)}
     bars_df["order"] = bars_df["component"].map(order_map)
     x = alt.X("month:O", title="Month", axis=alt.Axis(labelAngle=0, labelOverlap=True))
     bars = alt.Chart(bars_df).mark_bar(stroke=style.ink["surface"], strokeWidth=1).encode(
         x=x,
-        y=alt.Y("value:Q", axis=style.money_axis("Per month")),
+        y=alt.Y("value:Q", axis=style.money_axis(y_title)),
         color=alt.Color("component:N", scale=style.component_scale(components), legend=alt.Legend(title=None, orient="bottom", labelLimit=320, columns=2)),
         order=alt.Order("order:Q"),
         tooltip=[alt.Tooltip("month:O", title="Month"), alt.Tooltip("component:N", title="Component"), style.money_tooltip("value:Q", "Amount")],
